@@ -1,109 +1,191 @@
 import os
 import requests
+import time
 
-# ===== Environment Variables =====
+# -----------------------------
+# CONFIG
+# -----------------------------
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
 MAILERLITE_API_KEY = os.environ.get("MAILERLITE_API_KEY")
-MAILERLITE_GROUP_ID = os.environ.get("MAILERLITE_GROUP_ID")
-MAILERLITE_SUBSCRIBER_EMAIL = os.environ.get("MAILERLITE_SUBSCRIBER_EMAIL", "")
-SENDER_NAME = os.environ.get("SENDER_NAME", "AranyHír")
-SENDER_EMAIL = os.environ.get("SENDER_EMAIL", "noreply@example.com")
+MAILERLITE_SUBSCRIBER_EMAIL = os.environ.get("MAILERLITE_SUBSCRIBER_EMAIL")
 
-# ===== Example live prices (replace with API if needed) =====
-live_prices = {
-    "Gold": "1,950 USD/oz",
-    "Silver": "24 USD/oz",
-    "raw": "ignore"
-}
+MODEL = "gpt-4.1-mini"
 
-# ===== Build user message =====
-if live_prices:
-    price_text = '\n'.join(f"{k}: {v}" for k, v in live_prices.items() if k != 'raw')
-    user_msg = (
-        f"Live árfolyam adatok (USD):\n{price_text}\n"
-        "Kérlek, használd ezeket az értékeket, és tüntesd fel, hogy honnan származnak."
+# -----------------------------
+# RETRY LOGIC FOR OPENAI CALL
+# -----------------------------
+def call_openai_with_retry(payload, headers, retries=3):
+    for attempt in range(retries):
+        response = requests.post(
+            "https://api.openai.com/v1/chat/completions",
+            json=payload,
+            headers=headers
+        )
+
+        if response.status_code == 429:
+            # Rate limit — wait and retry
+            wait_time = 3 * (attempt + 1)
+            print(f"[OpenAI] 429 rate limit — retrying in {wait_time}s...")
+            time.sleep(wait_time)
+            continue
+
+        try:
+            response.raise_for_status()
+        except:
+            print("[OpenAI] API error:", response.text)
+            raise
+
+        return response.json()
+
+    # All retries failed
+    raise Exception("OpenAI API failed after multiple retries.")
+
+
+# -----------------------------
+# GET LIVE GOLD/SILVER PRICES
+# -----------------------------
+def get_live_prices():
+    url = "https://metals-api.com/api/latest?access_key=demo&base=USD&symbols=XAU,XAG"
+    try:
+        response = requests.get(url, timeout=10)
+        response.raise_for_status()
+        data = response.json()
+
+        rates = data.get("rates", {})
+        return {
+            "Gold (XAU)": rates.get("XAU"),
+            "Silver (XAG)": rates.get("XAG"),
+            "raw": data
+        }
+    except Exception as e:
+        print("Price fetch error:", e)
+        return {"error": str(e)}
+
+
+# -----------------------------
+# GENERATE DAILY INSIGHT
+# -----------------------------
+def generate_insight(live_prices):
+
+    # Prepare system prompt
+    system_prompt = """
+    Készíts magyar nyelvű, rövid, közérthető elemzést az arany és ezüst piacról.
+    A stílus legyen profi, de könnyen emészthető.
+    Használd fel az árfolyam-adatokat, ha rendelkezésre állnak.
+    """
+
+    # Build message for OpenAI
+    price_text = ""
+    if live_prices and "error" not in live_prices:
+        price_text = '\n'.join(f"{k}: {v}" for k, v in live_prices.items() if k != "raw")
+
+    user_message = (
+        f"Itt vannak a friss árfolyamok (USD):\n{price_text}\n\n"
+        "Kérlek, készíts egy kb. 2 bekezdéses piaci összefoglalót."
     )
-else:
-    user_msg = "Nincsenek elérhető árfolyam adatok."
 
-# ===== OpenAI prompt =====
-system_prompt = (
-    "Te vagy egy pénzügyi elemző, aki magyar nyelvű arany/ezüst piaci összefoglalót készít."
-)
+    payload = {
+        "model": MODEL,
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_message}
+        ]
+    }
 
-prompt = f"""
-Kérlek, írj rövid magyar nyelvű hírlevelet a következő árfolyamok alapján:
+    headers = {"Authorization": f"Bearer {OPENAI_API_KEY}"}
 
-{user_msg}
+    data = call_openai_with_retry(payload, headers)
 
-Formázd szöveges, könnyen olvasható módon.
-"""
+    try:
+        return data["choices"][0]["message"]["content"]
+    except:
+        return "Hiba történt a szöveg generálásakor."
 
-# ===== Call OpenAI API =====
-openai_url = "https://api.openai.com/v1/chat/completions"
-headers = {
-    "Authorization": f"Bearer {OPENAI_API_KEY}",
-    "Content-Type": "application/json"
-}
-payload = {
-    "model": "gpt-3.5-turbo",
-    "messages": [
-        {"role": "system", "content": system_prompt},
-        {"role": "user", "content": prompt}
-    ],
-    "temperature": 0.7
-}
 
-response = requests.post(openai_url, headers=headers, json=payload)
-response.raise_for_status()
-data = response.json()
-generated_content = data['choices'][0]['message']['content']
+# -----------------------------
+# FORMAT EMAIL (PLAIN TEXT)
+# -----------------------------
+def format_email_text(insight, prices):
+    price_text = ""
+    if prices and "error" not in prices:
+        price_text = '\n'.join(f"{k}: {v}" for k, v in prices.items() if k != "raw")
 
-# ===== Build HTML email =====
-html_email = f"""
-<div>
-<h1>Arany & Ezüst napi összefoglaló</h1>
-<p>{generated_content}</p>
-<hr/>
-<p style="font-size:12px;color:#666;">
-Ezt a hírlevelet automatizált rendszer küldte — Arany/Ezüst hírek.
-</p>
-</div>
-"""
+    msg = (
+        "Arany & Ezüst Piaci Összefoglaló\n\n"
+        f"{insight}\n\n"
+        "Aktuális árfolyamok (USD):\n"
+        f"{price_text}\n\n"
+        "Automatizált napi jelentés."
+    )
+    return msg
 
-# ===== Send via MailerLite =====
-mailer_url = f"https://api.mailerlite.com/api/v2/groups/{MAILERLITE_GROUP_ID}/subscribers"
 
-# Prepare subscriber payload
-subscriber_payload = {
-    "email": MAILERLITE_SUBSCRIBER_EMAIL,
-    "fields": {
-        "name": SENDER_NAME
-    },
-    "resubscribe": True
-}
+# -----------------------------
+# SEND EMAIL VIA MAILERLITE
+# -----------------------------
+def send_email(subject, text_content):
 
-# Add subscriber (if not exists)
-requests.post(
-    mailer_url,
-    headers={"X-MailerLite-ApiKey": MAILERLITE_API_KEY, "Content-Type": "application/json"},
-    json=subscriber_payload
-)
+    url = "https://connect.mailerlite.com/api/subscribers"
 
-# Send campaign
-campaign_payload = {
-    "subject": "Heti Arany/Ezüst Hírlevél",
-    "from": {"email": SENDER_EMAIL, "name": SENDER_NAME},
-    "html": html_email,
-    "groups": [MAILERLITE_GROUP_ID]
-}
+    payload = {
+        "email": MAILERLITE_SUBSCRIBER_EMAIL,
+        "fields": {"name": "Subscriber"},
+        "status": "active"
+    }
 
-campaign_url = "https://api.mailerlite.com/api/v2/campaigns"
-campaign_response = requests.post(
-    campaign_url,
-    headers={"X-MailerLite-ApiKey": MAILERLITE_API_KEY, "Content-Type": "application/json"},
-    json=campaign_payload
-)
-campaign_response.raise_for_status()
+    # Ensure the subscriber exists (MailerLite requirement)
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {MAILERLITE_API_KEY}"
+    }
 
-print("Hírlevél sikeresen elküldve!")
+    print("[MailerLite] Adding/updating subscriber...")
+    requests.post(url, json=payload, headers=headers)
+
+    # Now send campaign email
+    campaign_url = "https://connect.mailerlite.com/api/campaigns"
+
+    campaign_payload = {
+        "type": "regular",
+        "name": subject,
+        "subject": subject,
+        "from": "Newsletter Bot",
+        "from_email": MAILERLITE_SUBSCRIBER_EMAIL,
+        "to": {"type": "subscriber", "email": MAILERLITE_SUBSCRIBER_EMAIL},
+        "content": {"plain": text_content},
+    }
+
+    print("[MailerLite] Creating campaign...")
+    response = requests.post(campaign_url, json=campaign_payload, headers=headers)
+
+    try:
+        response.raise_for_status()
+        print("[MailerLite] Email sent successfully.")
+    except:
+        print("[MailerLite] Error sending email:", response.text)
+
+
+# -----------------------------
+# MAIN FUNCTION
+# -----------------------------
+def main():
+    print("Fetching prices...")
+    prices = get_live_prices()
+
+    print("Generating insight...")
+    insight = generate_insight(prices)
+
+    print("Formatting email...")
+    text_email = format_email_text(insight, prices)
+
+    print("Sending email...")
+    send_email("Arany & Ezüst Piaci Hírlevél", text_email)
+
+    print("Job done successfully.")
+
+
+# -----------------------------
+# ENTRY POINT
+# -----------------------------
+if __name__ == "__main__":
+    main()
