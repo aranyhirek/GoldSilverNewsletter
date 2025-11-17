@@ -142,13 +142,13 @@ def generate_newsletter_html(live_prices: Optional[dict] = None) -> str:
 
     # If we have live prices, give them to the model as context and ask to mention them
     user_msg = 'Kérlek készíts napi arany/ezüst összefoglalót magyarul.'
-    if live_prices:
-        # include numeric prices if available
-price_text = '\n'.join(f"{k}: {v}" for k, v in live_prices.items() if k != 'raw')
-user_msg += (
-    f"\nLive árfolyam adatok (USD):\n{price_text}\n"
-    "Kérlek, használd ezeket az értékeket, és tüntesd fel, hogy honnan származnak."
-)
+if live_prices:
+    # include numeric prices if available
+    price_text = '\n'.join(f"{k}: {v}" for k, v in live_prices.items() if k != 'raw')
+    user_msg += (
+        f"\nLive árfolyam adatok (USD):\n{price_text}\n"
+        "Kérlek, használd ezeket az értékeket, és tüntesd fel, hogy honnan származnak."
+    )
     payload = {
         'model': MODEL,
         'messages': [
@@ -301,3 +301,4 @@ def main():
 if __name__ == '__main__':
 
     main()
+
