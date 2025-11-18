@@ -45,21 +45,28 @@ def call_openai_with_retry(payload, headers, retries=3):
 # GET LIVE GOLD/SILVER PRICES
 # -----------------------------
 def get_live_prices():
-    url = "https://metals-api.com/api/latest?access_key=demo&base=USD&symbols=XAU,XAG"
     try:
-        response = requests.get(url, timeout=10)
-        response.raise_for_status()
-        data = response.json()
+        gold_resp = requests.get("https://api.metals.live/v1/spot/gold", timeout=10)
+        silver_resp = requests.get("https://api.metals.live/v1/spot/silver", timeout=10)
 
-        rates = data.get("rates", {})
+        gold_resp.raise_for_status()
+        silver_resp.raise_for_status()
+
+        gold_data = gold_resp.json()
+        silver_data = silver_resp.json()
+
+        gold_price = gold_data[0].get("price")
+        silver_price = silver_data[0].get("price")
+
         return {
-            "Gold (XAU)": rates.get("XAU"),
-            "Silver (XAG)": rates.get("XAG"),
-            "raw": data
+            "Gold (XAU)": gold_price,
+            "Silver (XAG)": silver_price
         }
+
     except Exception as e:
         print("Price fetch error:", e)
         return {"error": str(e)}
+
 
 
 # -----------------------------
@@ -189,3 +196,4 @@ def main():
 # -----------------------------
 if __name__ == "__main__":
     main()
+
