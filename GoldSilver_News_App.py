@@ -46,17 +46,27 @@ def call_openai_with_retry(payload, headers, retries=3):
 # -----------------------------
 def get_live_prices():
     try:
-        gold_resp = requests.get("https://api.metals.live/v1/spot/gold", timeout=10)
-        silver_resp = requests.get("https://api.metals.live/v1/spot/silver", timeout=10)
-
+        # Gold
+        gold_resp = requests.get(
+            "https://forex-data-feed.swissquote.com/public-quotes/bbo/USD/XAU",
+            timeout=10
+        )
         gold_resp.raise_for_status()
+        gold_json = gold_resp.json()
+        gold_bid = gold_json["spreadProfilePrices"]["bid"]
+        gold_ask = gold_json["spreadProfilePrices"]["ask"]
+        gold_price = (gold_bid + gold_ask) / 2
+
+        # Silver
+        silver_resp = requests.get(
+            "https://forex-data-feed.swissquote.com/public-quotes/bbo/USD/XAG",
+            timeout=10
+        )
         silver_resp.raise_for_status()
-
-        gold_data = gold_resp.json()
-        silver_data = silver_resp.json()
-
-        gold_price = gold_data[0].get("price")
-        silver_price = silver_data[0].get("price")
+        silver_json = silver_resp.json()
+        silver_bid = silver_json["spreadProfilePrices"]["bid"]
+        silver_ask = silver_json["spreadProfilePrices"]["ask"]
+        silver_price = (silver_bid + silver_ask) / 2
 
         return {
             "Gold (XAU)": gold_price,
@@ -66,8 +76,6 @@ def get_live_prices():
     except Exception as e:
         print("Price fetch error:", e)
         return {"error": str(e)}
-
-
 
 # -----------------------------
 # GENERATE DAILY INSIGHT
@@ -196,4 +204,5 @@ def main():
 # -----------------------------
 if __name__ == "__main__":
     main()
+
 
