@@ -1,208 +1,172 @@
 import os
-import requests
 import time
+import requests
+import yfinance as yf
 
-# -----------------------------
+# ============================================================
 # CONFIG
-# -----------------------------
-OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
-MAILERLITE_API_KEY = os.environ.get("MAILERLITE_API_KEY")
-MAILERLITE_SUBSCRIBER_EMAIL = os.environ.get("MAILERLITE_SUBSCRIBER_EMAIL")
+# ============================================================
 
-MODEL = "gpt-4.1-mini"
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+SENDGRID_API_KEY = os.getenv("SENDGRID_API_KEY")
+TO_EMAIL = os.getenv("TO_EMAIL")
+FROM_EMAIL = os.getenv("FROM_EMAIL")
 
-# -----------------------------
-# RETRY LOGIC FOR OPENAI CALL
-# -----------------------------
-def call_openai_with_retry(payload, headers, retries=3):
-    for attempt in range(retries):
-        response = requests.post(
-            "https://api.openai.com/v1/chat/completions",
-            json=payload,
-            headers=headers
-        )
+MODEL = "gpt-4o-mini"
 
-        if response.status_code == 429:
-            # Rate limit — wait and retry
-            wait_time = 3 * (attempt + 1)
-            print(f"[OpenAI] 429 rate limit — retrying in {wait_time}s...")
-            time.sleep(wait_time)
+SYSTEM_PROMPT = """
+Te egy arany/ezüst piacot elemző szakértő vagy.
+Írj egy kb. 3 bekezdéses, közérthető, lényegre törő napi piaci összefoglalót.
+Ne ismételd meg a felhasználó által küldött árakat, csak használd fel őket az elemzésben.
+"""
+
+# ============================================================
+# OPENAI – retry védett hívás
+# ============================================================
+
+def call_openai_with_retry(payload, headers, max_retries=5):
+    url = "https://api.openai.com/v1/chat/completions"
+    for attempt in range(max_retries):
+        r = requests.post(url, json=payload, headers=headers)
+
+        if r.status_code == 200:
+            return r.json()
+
+        # 429 – rate limit
+        if r.status_code == 429:
+            wait = 3 * (attempt + 1)
+            print(f"[OpenAI] 429 – retry {attempt+1}/{max_retries}, várakozás {wait}s")
+            time.sleep(wait)
             continue
 
-        try:
-            response.raise_for_status()
-        except:
-            print("[OpenAI] API error:", response.text)
-            raise
+        # más hiba → megszakítjuk
+        print("[OpenAI ERROR]", r.text)
+        r.raise_for_status()
 
-        return response.json()
+    raise Exception("OpenAI API többszöri próbálkozás után is hibát adott.")
 
-    # All retries failed
-    raise Exception("OpenAI API failed after multiple retries.")
+# ============================================================
+# ÁRFOLYAMOK (YFINANCE)
+# ============================================================
 
-
-# -----------------------------
-# GET LIVE GOLD/SILVER PRICES
-# -----------------------------
 def get_live_prices():
-    try:
-        # Gold
-        gold_resp = requests.get(
-            "https://forex-data-feed.swissquote.com/public-quotes/bbo/USD/XAU",
-            timeout=10
-        )
-        gold_resp.raise_for_status()
-        gold_json = gold_resp.json()
-        gold_bid = gold_json["spreadProfilePrices"]["bid"]
-        gold_ask = gold_json["spreadProfilePrices"]["ask"]
-        gold_price = (gold_bid + gold_ask) / 2
+    """
+    YFinance: XAUUSD=X (arany), XAGUSD=X (ezüst)
+    Ezek stabilak és elérhetők API kulcs nélkül is.
+    """
 
-        # Silver
-        silver_resp = requests.get(
-            "https://forex-data-feed.swissquote.com/public-quotes/bbo/USD/XAG",
-            timeout=10
-        )
-        silver_resp.raise_for_status()
-        silver_json = silver_resp.json()
-        silver_bid = silver_json["spreadProfilePrices"]["bid"]
-        silver_ask = silver_json["spreadProfilePrices"]["ask"]
-        silver_price = (silver_bid + silver_ask) / 2
+    print("Fetching YFinance prices...")
+
+    try:
+        gold = yf.Ticker("XAUUSD=X").history(period="1d")
+        silver = yf.Ticker("XAGUSD=X").history(period="1d")
+
+        if gold.empty or silver.empty:
+            raise Exception("Üres YF adat – próbáld később újra.")
+
+        gold_price = round(float(gold["Close"].iloc[-1]), 2)
+        silver_price = round(float(silver["Close"].iloc[-1]), 2)
 
         return {
-            "Gold (XAU)": gold_price,
-            "Silver (XAG)": silver_price
+            "gold": gold_price,
+            "silver": silver_price,
+            "raw": {"gold": gold.to_dict(), "silver": silver.to_dict()}
         }
 
     except Exception as e:
         print("Price fetch error:", e)
-        return {"error": str(e)}
+        return None
 
-# -----------------------------
-# GENERATE DAILY INSIGHT
-# -----------------------------
-def generate_insight(live_prices):
+# ============================================================
+# INSIGHT GENERÁLÁS
+# ============================================================
 
-    # Prepare system prompt
-    system_prompt = """
-    Készíts magyar nyelvű, rövid, közérthető elemzést az arany és ezüst piacról.
-    A stílus legyen profi, de könnyen emészthető.
-    Használd fel az árfolyam-adatokat, ha rendelkezésre állnak.
-    """
+def generate_insight(prices):
+    headers = {
+        "Authorization": f"Bearer {OPENAI_API_KEY}",
+        "Content-Type": "application/json"
+    }
 
-    # Build message for OpenAI
-    price_text = ""
-    if live_prices and "error" not in live_prices:
-        price_text = '\n'.join(f"{k}: {v}" for k, v in live_prices.items() if k != "raw")
-
-    user_message = (
-        f"Itt vannak a friss árfolyamok (USD):\n{price_text}\n\n"
-        "Kérlek, készíts egy kb. 2 bekezdéses piaci összefoglalót."
-    )
+    user_msg = "Íme a mai arany/ezüst árak USD-ben:\n"
+    if prices:
+        user_msg += f"- Arany (XAUUSD): {prices['gold']} USD\n"
+        user_msg += f"- Ezüst (XAGUSD): {prices['silver']} USD\n"
+    else:
+        user_msg += "(Nem sikerült lekérni az árakat.)\n"
 
     payload = {
         "model": MODEL,
         "messages": [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_message}
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": user_msg}
         ]
     }
 
-    headers = {"Authorization": f"Bearer {OPENAI_API_KEY}"}
-
     data = call_openai_with_retry(payload, headers)
+    return data["choices"][0]["message"]["content"]
 
-    try:
-        return data["choices"][0]["message"]["content"]
-    except:
-        return "Hiba történt a szöveg generálásakor."
+# ============================================================
+# HTML GENERÁLÁS
+# ============================================================
 
+def generate_html(content):
+    footer = """
+    <hr>
+    <p style="font-size:12px;color:#555;">
+        Ezt az e-mailt egy automatizált rendszer küldte – Arany/Ezüst Piaci Összefoglaló.
+    </p>
+    """
 
-# -----------------------------
-# FORMAT EMAIL (PLAIN TEXT)
-# -----------------------------
-def format_email_text(insight, prices):
-    price_text = ""
-    if prices and "error" not in prices:
-        price_text = '\n'.join(f"{k}: {v}" for k, v in prices.items() if k != "raw")
+    html = f"""
+    <div style="font-family:Arial; padding:20px;">
+        <h1>Arany & Ezüst Piaci Összefoglaló</h1>
+        <div style="font-size:16px; line-height:1.6;">
+            {content}
+        </div>
+        {footer}
+    </div>
+    """
 
-    msg = (
-        "Arany & Ezüst Piaci Összefoglaló\n\n"
-        f"{insight}\n\n"
-        "Aktuális árfolyamok (USD):\n"
-        f"{price_text}\n\n"
-        "Automatizált napi jelentés."
-    )
-    return msg
+    return html
 
+# ============================================================
+# EMAIL KÜLDÉS SENDGRIDDEL
+# ============================================================
 
-# -----------------------------
-# SEND EMAIL VIA MAILERLITE
-# -----------------------------
-def send_email(subject, text_content):
-
-    url = "https://connect.mailerlite.com/api/subscribers"
+def send_email(subject, html):
+    url = "https://api.sendgrid.com/v3/mail/send"
+    headers = {
+        "Authorization": f"Bearer {SENDGRID_API_KEY}",
+        "Content-Type": "application/json"
+    }
 
     payload = {
-        "email": MAILERLITE_SUBSCRIBER_EMAIL,
-        "fields": {"name": "Subscriber"},
-        "status": "active"
-    }
-
-    # Ensure the subscriber exists (MailerLite requirement)
-    headers = {
-        "Content-Type": "application/json",
-        "Authorization": f"Bearer {MAILERLITE_API_KEY}"
-    }
-
-    print("[MailerLite] Adding/updating subscriber...")
-    requests.post(url, json=payload, headers=headers)
-
-    # Now send campaign email
-    campaign_url = "https://connect.mailerlite.com/api/campaigns"
-
-    campaign_payload = {
-        "type": "regular",
-        "name": subject,
+        "personalizations": [{"to": [{"email": TO_EMAIL}]}],
+        "from": {"email": FROM_EMAIL},
         "subject": subject,
-        "from": "Newsletter Bot",
-        "from_email": MAILERLITE_SUBSCRIBER_EMAIL,
-        "to": {"type": "subscriber", "email": MAILERLITE_SUBSCRIBER_EMAIL},
-        "content": {"plain": text_content},
+        "content": [{"type": "text/html", "value": html}]
     }
 
-    print("[MailerLite] Creating campaign...")
-    response = requests.post(campaign_url, json=campaign_payload, headers=headers)
+    r = requests.post(url, json=payload, headers=headers)
+    if r.status_code >= 300:
+        print("Email error:", r.text)
+    else:
+        print("Email sent successfully.")
 
-    try:
-        response.raise_for_status()
-        print("[MailerLite] Email sent successfully.")
-    except:
-        print("[MailerLite] Error sending email:", response.text)
+# ============================================================
+# MAIN
+# ============================================================
 
-
-# -----------------------------
-# MAIN FUNCTION
-# -----------------------------
 def main():
-    print("Fetching prices...")
+    print("=== Gold/Silver Daily Job started ===")
+
     prices = get_live_prices()
-
-    print("Generating insight...")
     insight = generate_insight(prices)
+    html = generate_html(insight)
 
-    print("Formatting email...")
-    text_email = format_email_text(insight, prices)
+    send_email("Arany & Ezüst napi összefoglaló", html)
 
-    print("Sending email...")
-    send_email("Arany & Ezüst Piaci Hírlevél", text_email)
+    print("=== Job finished ===")
 
-    print("Job done successfully.")
-
-
-# -----------------------------
-# ENTRY POINT
-# -----------------------------
 if __name__ == "__main__":
     main()
-
-
