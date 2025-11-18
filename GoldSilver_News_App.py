@@ -80,9 +80,9 @@ def generate_insight(prices):
     }
 
     user_msg = "Íme a mai arany/ezüst árak USD-ben:\n"
-    if prices:
-        user_msg += f"- Arany (XAUUSD): {prices['gold']} USD\n"
-        user_msg += f"- Ezüst (XAGUSD): {prices['silver']} USD\n"
+    if prices and "error" not in prices:
+        user_msg += f"- Arany (XAU): {prices['Gold (XAU)']} USD\n"
+        user_msg += f"- Ezüst (XAG): {prices['Silver (XAG)']} USD\n"
     else:
         user_msg += "(Nem sikerült lekérni az árakat.)\n"
 
@@ -162,4 +162,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
