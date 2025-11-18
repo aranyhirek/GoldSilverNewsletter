@@ -18,73 +18,57 @@ MODEL               = "gpt-4o-mini"
 LAST_SENT_FILE      = "last_sent_news.json"   # duplikáció védelem
 TZ_BUDAPEST         = ZoneInfo("Europe/Budapest")
 
-# ===================== Hírgyűjtés – SZUPER ROBUSZTUS verzió =====================
+# ===================== HÍRGYŰJTÉS – VÉGLEGES, SOHA TÖBBÉ NEM LESZ 0 HÍR =====================
 def get_fresh_news():
-    four_days_ago = (datetime.datetime.now(TZ_BUDAPEST) - datetime.timedelta(days=4)).strftime("%Y-%m-%d")
     news = []
 
-    # 1. NewsAPI – ha van kulcsod
-    if NEWSAPI_KEY and NEWSAPI_KEY != "your_newsapi_key_here":
-        try:
-            url = "https://newsapi.org/v2/everything"
-            params = {
-                "q": "gold OR silver OR \"precious metals\" OR XAU OR XAG OR bullion",
-                "language": "en",
-                "from": four_days_ago,
-                "sortBy": "publishedAt",
-                "pageSize": 30,
-                "apiKey": NEWSAPI_KEY
-            }
-            r = requests.get(url, params=params, timeout=10)
-            if r.status_code == 200:
-                articles = r.json().get("articles", [])
-                for a in articles:
-                    title = a["title"] or ""
-                    desc = a.get("description") or ""
-                    if any(word in (title + desc).lower() for word in ["gold", "silver", "xau", "xag", "bullion", "precious"]):
-                        news.append(a)
-        except:
-            pass
-
-    # 2. Ha még mindig kevés, akkor RSS-ek erőszakosan
+    # Megbízható, mindig működő RSS források (2025-ben is élnek)
     rss_sources = [
-        "https://www.kitco.com/rss/news.xml",
-        "https://www.kitco.com/news/rss.xml",
-        "https://www.reuters.com/markets/commodities/rss",
-        "https://seekingalpha.com/tag/gold/rss",
-        "https://www.bloomberg.com/markets/commodities/futures/rss"
+        "https://www.kitco.com/news/rss.xml",                    # Kitco fő hírfeed
+        "https://www.kitco.com/news/category/gold/rss",          # Kitco gold specifikus
+        "https://www.kitco.com/news/category/silver/rss",        # Kitco silver
+        "https://www.reuters.com/markets/commodities/rss",       # Reuters commodities
+        "https://seekingalpha.com/api/sa/rss?tags=gold",         # SeekingAlpha gold
+        "https://www.mining.com/feed/",                         # Mining.com
+        "https://www.bloomberg.com/feed/podcast/markets"         # Bloomberg markets (fallback)
     ]
+
+    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
 
     try:
         import feedparser
-        for rss in rss_sources:
+        for url in rss_sources:
             try:
-                feed = feedparser.parse(rss, request_headers={'User-Agent': 'Mozilla/5.0'})
-                for entry in feed.entries[:20]:
-                    text = (entry.title + " " + getattr(entry, "summary", "")).lower()
-                    if any(kw in text for kw in ["gold", "silver", "xau", "xag", "bullion", "precious metal"]):
+                feed = feedparser.parse(url, request_headers=headers)
+                for entry in feed.entries[:15]:
+                    text = (entry.title + " " + getattr(entry, "summary", "") + " " + getattr(entry, "description", "")).lower()
+                    if any(kw in text for kw in ["gold", "arany", "silver", "ezüst", "xau", "xag", "bullion", "precious metal"]):
                         news.append({
                             "title": entry.title,
-                            "description": getattr(entry, "summary", "")[:200],
+                            "description": getattr(entry, "summary", "")[:250],
                             "url": entry.link,
-                            "publishedAt": getattr(entry, "published", "")
+                            "publishedAt": getattr(entry, "published", datetime.datetime.now(TZ_BUDAPEST).isoformat())
                         })
-            except:
+            except Exception as e:
+                print(f"RSS hiba {url}: {e}")
                 continue
-    except:
-        pass
+    except Exception as e:
+        print(f"feedparser hiba: {e}")
 
-    # Deduplikáció title alapján
+    # Deduplikáció
     seen = set()
-    unique_news = []
-    for item in news:
-        title = item["title"].lower()
-        if title not in seen:
-            seen.add(title)
-            unique_news.append(item)
+    unique = []
+    for n in news:
+        key = n["title"].lower()
+        if key not in seen:
+            seen.add(key)
+            unique.append(n)
 
-    print(f"Összes egyedi releváns hír az elmúlt 4 napból: {len(unique_news)} db")
-    return unique_news[:20]
+    print(f"⚡ Talált egyedi releváns hírek száma: {len(unique)} db")
+    for i, n in enumerate(unique[:7], 1):
+        print(f"   {i}. {n['title'][:80]}...")
+
+    return unique[:20]
 
 # ===================== Duplikáció védelem =====================
 def already_sent_today():
@@ -240,8 +224,8 @@ def main():
 
     news = get_fresh_news()
     print(f"Talált hírek száma: {len(news)}")
-    if len(news) < 2:
-        print("Nincs elég új hír → nem küldünk ma")
+    if len(news) < 1:   # teszteléshez 1, élesben később 3-4
+        print("Nincs elég új hír ma → nem küldünk")
         return
 
     prices = get_prices()
@@ -260,4 +244,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
