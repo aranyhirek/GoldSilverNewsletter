@@ -213,10 +213,10 @@ def main():
         print("Ma már küldtünk hírlevelet → kilépés")
         return
 
-    news = get_fresh_news()
-    if len(news) < 3:
-        print("Nincs elég új hír (kevesebb mint 3) → nem küldünk ma")
-        return
+print(f"Talált hírek száma: {len(news)}")
+if len(news) < 2:   # 2-re csökkentve, szinte mindig küldeni fog
+    print("Nincs elég új hír (2-nél kevesebb) → nem küldünk ma")
+    return
 
     prices = get_prices()
     content = generate_newsletter_content(news, prices)
@@ -233,3 +233,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
