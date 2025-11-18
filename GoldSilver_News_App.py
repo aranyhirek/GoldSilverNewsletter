@@ -18,48 +18,73 @@ MODEL               = "gpt-4o-mini"
 LAST_SENT_FILE      = "last_sent_news.json"   # duplikáció védelem
 TZ_BUDAPEST         = ZoneInfo("Europe/Budapest")
 
-# ===================== Hírgyűjtés =====================
+# ===================== Hírgyűjtés – SZUPER ROBUSZTUS verzió =====================
 def get_fresh_news():
     four_days_ago = (datetime.datetime.now(TZ_BUDAPEST) - datetime.timedelta(days=4)).strftime("%Y-%m-%d")
-    
-    # 1. NewsAPI.org (legmegbízhatóbb)
-    if NEWSAPI_KEY:
-        url = "https://newsapi.org/v2/everything"
-        params = {
-            "q": "(gold OR silver OR XAU OR XAG OR \"precious metals\") -crypto -bitcoin -ethereum",
-            "language": "en",
-            "from": four_days_ago,
-            "sortBy": "publishedAt",
-            "pageSize": 20,
-            "apiKey": NEWSAPI_KEY
-        }
-        resp = requests.get(url, params=params, timeout=15)
-        if resp.status_code == 200:
-            articles = resp.json().get("articles", [])
-            return [a for a in articles if any(kw in a["title"].lower() + a["description"].lower() 
-                     for kw in ["gold", "silver", "xau", "xag", "bullion", "precious metal"])]
+    news = []
 
-    # 2. Fallback: Kitco + Reuters RSS (ha nincs NewsAPI kulcs)
-    rss_sources = [
-        "https://www.kitco.com/news/rss.xml",
-        "https://www.reuters.com/markets/commodities/rss"
-    ]
-    all_articles = []
-    for rss in rss_sources:
+    # 1. NewsAPI – ha van kulcsod
+    if NEWSAPI_KEY and NEWSAPI_KEY != "your_newsapi_key_here":
         try:
-            import feedparser
-            feed = feedparser.parse(rss)
-            for entry in feed.entries[:15]:
-                if any(kw in entry.title.lower() for kw in ["gold", "silver"]):
-                    all_articles.append({
-                        "title": entry.title,
-                        "description": entry.summary if hasattr(entry, "summary") else "",
-                        "url": entry.link,
-                        "publishedAt": entry.published if hasattr(entry, "published") else ""
-                    })
+            url = "https://newsapi.org/v2/everything"
+            params = {
+                "q": "gold OR silver OR \"precious metals\" OR XAU OR XAG OR bullion",
+                "language": "en",
+                "from": four_days_ago,
+                "sortBy": "publishedAt",
+                "pageSize": 30,
+                "apiKey": NEWSAPI_KEY
+            }
+            r = requests.get(url, params=params, timeout=10)
+            if r.status_code == 200:
+                articles = r.json().get("articles", [])
+                for a in articles:
+                    title = a["title"] or ""
+                    desc = a.get("description") or ""
+                    if any(word in (title + desc).lower() for word in ["gold", "silver", "xau", "xag", "bullion", "precious"]):
+                        news.append(a)
         except:
-            continue
-    return all_articles
+            pass
+
+    # 2. Ha még mindig kevés, akkor RSS-ek erőszakosan
+    rss_sources = [
+        "https://www.kitco.com/rss/news.xml",
+        "https://www.kitco.com/news/rss.xml",
+        "https://www.reuters.com/markets/commodities/rss",
+        "https://seekingalpha.com/tag/gold/rss",
+        "https://www.bloomberg.com/markets/commodities/futures/rss"
+    ]
+
+    try:
+        import feedparser
+        for rss in rss_sources:
+            try:
+                feed = feedparser.parse(rss, request_headers={'User-Agent': 'Mozilla/5.0'})
+                for entry in feed.entries[:20]:
+                    text = (entry.title + " " + getattr(entry, "summary", "")).lower()
+                    if any(kw in text for kw in ["gold", "silver", "xau", "xag", "bullion", "precious metal"]):
+                        news.append({
+                            "title": entry.title,
+                            "description": getattr(entry, "summary", "")[:200],
+                            "url": entry.link,
+                            "publishedAt": getattr(entry, "published", "")
+                        })
+            except:
+                continue
+    except:
+        pass
+
+    # Deduplikáció title alapján
+    seen = set()
+    unique_news = []
+    for item in news:
+        title = item["title"].lower()
+        if title not in seen:
+            seen.add(title)
+            unique_news.append(item)
+
+    print(f"Összes egyedi releváns hír az elmúlt 4 napból: {len(unique_news)} db")
+    return unique_news[:20]
 
 # ===================== Duplikáció védelem =====================
 def already_sent_today():
@@ -214,9 +239,9 @@ def main():
         return
 
     news = get_fresh_news()
-    print(f"Talált hírek száma: {len(news)}")          # <- ez az új debug sor
+    print(f"Talált hírek száma: {len(news)}")
     if len(news) < 2:
-        print("Nincs elég új hír (2-nél kevesebb) → nem küldünk ma")
+        print("Nincs elég új hír → nem küldünk ma")
         return
 
     prices = get_prices()
@@ -235,3 +260,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
