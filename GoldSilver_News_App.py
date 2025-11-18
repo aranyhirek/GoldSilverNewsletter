@@ -213,28 +213,25 @@ def main():
         print("Ma már küldtünk hírlevelet → kilépés")
         return
 
-print(f"Talált hírek száma: {len(news)}")
-if len(news) < 2:   # 2-re csökkentve, szinte mindig küldeni fog
-    print("Nincs elég új hír (2-nél kevesebb) → nem küldünk ma")
-    return
-    
-print(f"Talált hírek száma: {len(news)}")
-for i, n in enumerate(news[:5], 1):
-    print(f"{i}. {n.get('title', n.get('title', 'N/A'))}")
+    news = get_fresh_news()
+    print(f"Talált hírek száma: {len(news)}")          # <- ez az új debug sor
+    if len(news) < 2:
+        print("Nincs elég új hír (2-nél kevesebb) → nem küldünk ma")
+        return
+
     prices = get_prices()
     content = generate_newsletter_content(news, prices)
 
-    # GPT válasza szét van választva
+    # GPT válasza szétválasztása
     lines = [l.strip() for l in content.split("\n") if l.strip()]
     subject = lines[0].replace("Subject:", "").replace("Tárgy:", "").strip()
-    preheader = lines[1].strip() if len(lines) > 1 else "Friss arany és ezüst piaci hírek egyenesen a postaládádba"
+    preheader = lines[1].strip() if len(lines) > 1 else "Friss arany és ezüst piaci hírek"
     body = "\n".join(lines[2:])
 
     html = build_html(subject, preheader, body, prices)
     create_and_send_campaign(subject, preheader, html)
     mark_as_sent(news)
 
+
 if __name__ == "__main__":
     main()
-
-
