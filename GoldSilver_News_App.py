@@ -217,7 +217,10 @@ print(f"Talált hírek száma: {len(news)}")
 if len(news) < 2:   # 2-re csökkentve, szinte mindig küldeni fog
     print("Nincs elég új hír (2-nél kevesebb) → nem küldünk ma")
     return
-
+    
+print(f"Talált hírek száma: {len(news)}")
+for i, n in enumerate(news[:5], 1):
+    print(f"{i}. {n.get('title', n.get('title', 'N/A'))}")
     prices = get_prices()
     content = generate_newsletter_content(news, prices)
 
@@ -233,4 +236,5 @@ if len(news) < 2:   # 2-re csökkentve, szinte mindig küldeni fog
 
 if __name__ == "__main__":
     main()
+
 
