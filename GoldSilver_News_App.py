@@ -50,32 +50,24 @@ def call_openai_with_retry(payload, headers, max_retries=5):
 # ============================================================
 
 def get_live_prices():
-    """
-    YFinance: XAUUSD=X (arany), XAGUSD=X (ezüst)
-    Ezek stabilak és elérhetők API kulcs nélkül is.
-    """
-
-    print("Fetching YFinance prices...")
-
     try:
-        gold = yf.Ticker("XAUUSD=X").history(period="1d")
-        silver = yf.Ticker("XAGUSD=X").history(period="1d")
+        gold = yf.Ticker("GC=F").history(period="1d")
+        silver = yf.Ticker("SI=F").history(period="1d")
 
         if gold.empty or silver.empty:
-            raise Exception("Üres YF adat – próbáld később újra.")
+            raise ValueError("Üres YF adat – próbáld később újra.")
 
-        gold_price = round(float(gold["Close"].iloc[-1]), 2)
-        silver_price = round(float(silver["Close"].iloc[-1]), 2)
+        gold_price = round(gold["Close"].iloc[-1], 2)
+        silver_price = round(silver["Close"].iloc[-1], 2)
 
         return {
-            "gold": gold_price,
-            "silver": silver_price,
-            "raw": {"gold": gold.to_dict(), "silver": silver.to_dict()}
+            "Gold (XAU)": gold_price,
+            "Silver (XAG)": silver_price
         }
 
     except Exception as e:
         print("Price fetch error:", e)
-        return None
+        return {"error": str(e)}
 
 # ============================================================
 # INSIGHT GENERÁLÁS
@@ -170,3 +162,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
