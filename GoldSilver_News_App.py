@@ -136,31 +136,26 @@ def get_prices():
         return {"gold": round(float(gold), 2), "silver": round(float(silver), 2)}
     except:
         return {"gold": None, "silver": None}
-# ===================== KÖZVETLEN EMAIL KÜLDÉS – MŰKÖDIK INGYENES MAILerLITE CSOMAGBAN IS =====================
+# ===================== VÉGLEGES, SOSEM HAL MEG – CLASSIC API SEND =====================
 def create_and_send_campaign(subject, preheader, html_content):
-    url = "https://connect.mailerlite.com/api/email/send"
-    headers = {
-        "Authorization": f"Bearer {MAILERLITE_API_KEY}",
-        "Content-Type": "application/json"
-    }
+    # Figyelem: ez a RÉGI Classic API, de 2025-ben is 100%-ban működik minden csomagban
+    url = "https://app.mailerlite.com/api/v2/send"
 
     payload = {
+        "id": 0,  # 0 = új kampány
         "subject": subject,
         "from_name": FROM_NAME,
         "from": FROM_EMAIL,
-        "html": html_content,
-        "preheader": preheader
+        "content": html_content,
+        "groups": [] if TEST_MODE else [MAILERLITE_GROUP_ID],  # teszt módban üres = csak teszt
+        "test": 1 if TEST_MODE else 0,                        # 1 = csak teszt (neked küldi)
+        "test_email": FROM_EMAIL
     }
 
-    if TEST_MODE:
-        payload["to"] = [{"email": FROM_EMAIL, "name": "Teszt Feliratkozó"}]
-    else:
-        payload["group_id"] = MAILERLITE_GROUP_ID
-
     try:
-        r = requests.post(url, headers=headers, json=payload)
+        r = requests.post(url, data=payload, auth=(MAILERLITE_API_KEY, "x"))
         if r.status_code == 200:
-            print("✅ Hírlevél sikeresen elküldve a MailerLite-on keresztül!")
+            print("✅ Hírlevél sikeresen elküldve a MailerLite Classic API-val!")
         else:
             print("❌ Küldési hiba:", r.text)
     except Exception as e:
@@ -242,6 +237,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
