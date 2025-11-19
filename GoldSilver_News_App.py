@@ -18,58 +18,48 @@ MODEL               = "gpt-4o-mini"
 LAST_SENT_FILE      = "last_sent_news.json"   # duplikáció védelem
 TZ_BUDAPEST         = ZoneInfo("Europe/Budapest")
 
-# ===================== HÍRGYŰJTÉS – VÉGLEGES, SOHA TÖBBÉ NEM LESZ 0 HÍR =====================
+# ===================== HÍRGYŰJTÉS – GOOGLE NEWS RSS (SOHA TÖBBÉ NEM LESZ 0 HÍR) =====================
 def get_fresh_news():
     news = []
-
-    # Megbízható, mindig működő RSS források (2025-ben is élnek)
-    rss_sources = [
-        "https://www.kitco.com/news/rss.xml",                    # Kitco fő hírfeed
-        "https://www.kitco.com/news/category/gold/rss",          # Kitco gold specifikus
-        "https://www.kitco.com/news/category/silver/rss",        # Kitco silver
-        "https://www.reuters.com/markets/commodities/rss",       # Reuters commodities
-        "https://seekingalpha.com/api/sa/rss?tags=gold",         # SeekingAlpha gold
-        "https://www.mining.com/feed/",                         # Mining.com
-        "https://www.bloomberg.com/feed/podcast/markets"         # Bloomberg markets (fallback)
+    # Google News RSS – mindig friss, mindig működik
+    google_rss_urls = [
+        "https://news.google.com/rss/search?q=arany+OR+ez%C3%BCst+OR+gold+OR+silver+OR+XAU+OR+XAG+when:4d&hl=hu&gl=HU&ceid=HU:hu",
+        "https://news.google.com/rss/search?q=gold+OR+silver+OR+%22precious+metals%22+when:4d&hl=en-US&gl=US&ceid=US:en",
     ]
 
     headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
 
     try:
         import feedparser
-        for url in rss_sources:
-            try:
-                feed = feedparser.parse(url, request_headers=headers)
-                for entry in feed.entries[:15]:
-                    text = (entry.title + " " + getattr(entry, "summary", "") + " " + getattr(entry, "description", "")).lower()
-                    if any(kw in text for kw in ["gold", "arany", "silver", "ezüst", "xau", "xag", "bullion", "precious metal"]):
-                        news.append({
-                            "title": entry.title,
-                            "description": getattr(entry, "summary", "")[:250],
-                            "url": entry.link,
-                            "publishedAt": getattr(entry, "published", datetime.datetime.now(TZ_BUDAPEST).isoformat())
-                        })
-            except Exception as e:
-                print(f"RSS hiba {url}: {e}")
-                continue
+        for url in google_rss_urls:
+            feed = feedparser.parse(url, request_headers=headers)
+            for entry in feed.entries[:30]:
+                title = entry.title.lower()
+                summary = getattr(entry, "summary", "").lower()
+                text = title + " " + summary
+                if any(kw in text for kw in ["gold", "arany", "silver", "ezüst", "xau", "xag", "bullion", "drágametall"]):
+                    news.append({
+                        "title": entry.title,
+                        "description": getattr(entry, "summary", "")[:300],
+                        "url": entry.link,
+                        "publishedAt": getattr(entry, "published", "")
+                    })
     except Exception as e:
-        print(f"feedparser hiba: {e}")
+        print(f"Hírgyűjtés hiba: {e}")
 
     # Deduplikáció
     seen = set()
     unique = []
     for n in news:
-        key = n["title"].lower()
-        if key not in seen:
-            seen.add(key)
+        if n["title"] not in seen:
+            seen.add(n["title"])
             unique.append(n)
 
-    print(f"⚡ Talált egyedi releváns hírek száma: {len(unique)} db")
-    for i, n in enumerate(unique[:7], 1):
-        print(f"   {i}. {n['title'][:80]}...")
+    print(f"⚡ Google News-ből talált egyedi releváns hírek: {len(unique)} db")
+    for i, n in enumerate(unique[:8], 1):
+        print(f"   {i}. {n['title'][:100]}")
 
     return unique[:20]
-
 # ===================== Duplikáció védelem =====================
 def already_sent_today():
     if not os.path.exists(LAST_SENT_FILE):
@@ -244,5 +234,6 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
