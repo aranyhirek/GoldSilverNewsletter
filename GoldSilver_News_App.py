@@ -136,47 +136,35 @@ def get_prices():
         return {"gold": round(float(gold), 2), "silver": round(float(silver), 2)}
     except:
         return {"gold": None, "silver": None}
-# ===================== MailerLite kampány – 2025-BEN MŰKÖDŐ VERZIÓ =====================
+# ===================== KÖZVETLEN EMAIL KÜLDÉS – MŰKÖDIK INGYENES MAILerLITE CSOMAGBAN IS =====================
 def create_and_send_campaign(subject, preheader, html_content):
-    url = "https://connect.mailerlite.com/api/campaigns"
+    url = "https://connect.mailerlite.com/api/email/send"
     headers = {
         "Authorization": f"Bearer {MAILERLITE_API_KEY}",
         "Content-Type": "application/json"
     }
 
     payload = {
-        "name": f"Arany & Ezüst Hírlevél – {datetime.datetime.now(TZ_BUDAPEST).strftime('%Y.%m.%d')}",
-        "type": "regular",
         "subject": subject,
         "from_name": FROM_NAME,
         "from": FROM_EMAIL,
-        "content": html_content,                # közvetlen HTML tartalom
-        "preheader_text": preheader             # ezt kéri az új API
+        "html": html_content,
+        "preheader": preheader
     }
 
-    # Teszt mód: csak neked küldi
     if TEST_MODE:
-        payload["recipients"] = {"test": {"emails": [FROM_EMAIL]}}
+        payload["to"] = [{"email": FROM_EMAIL, "name": "Teszt Feliratkozó"}]
     else:
-        payload["recipients"] = {"group_id": int(MAILERLITE_GROUP_ID)}
+        payload["group_id"] = MAILERLITE_GROUP_ID
 
     try:
         r = requests.post(url, headers=headers, json=payload)
-        if r.status_code in (200, 201):
-            campaign_id = r.json()["data"]["id"]
-            print(f"✅ Kampány létrehozva (ID: {campaign_id})")
-            # Azonnali küldés
-            send_at = null vagy kihagyva = most
-            send_resp = requests.post(
-                f"https://connect.mailerlite.com/api/campaigns/{campaign_id}/schedule",
-                headers=headers,
-                json={"send_at": None}
-            )
-            print("✅ Hírlevél elküldve!" if send_resp.ok else f"⚠️ Küldés hiba: {send_resp.text}")
+        if r.status_code == 200:
+            print("✅ Hírlevél sikeresen elküldve a MailerLite-on keresztül!")
         else:
-            print("❌ Kampány létrehozási hiba:", r.text)
+            print("❌ Küldési hiba:", r.text)
     except Exception as e:
-        print("❌ MailerLite exception:", str(e))
+        print("❌ Küldés exception:", str(e))
 
 # ===================== HTML sablon =====================
 def build_html(subject, preheader, body, prices):
@@ -206,8 +194,8 @@ def build_html(subject, preheader, body, prices):
                         <td style="padding:30px;">
                             <p style="color:#666; font-size:14px;">{today}</p>
                             <h2 style="color:#b8860b; border-bottom:2px solid #b8860b; padding-bottom:10px;">Aktuális árak</h2>
-                            <p><strong>Arany (XAU/USD):</strong> {prices['gold']} USD<br>
-                               <strong>Ezüst (XAG/USD):</strong> {prices['silver']} USD</p>
+                            <p><strong>Arany (XAU/USD):</strong> {prices.get('gold', 'N/A')} USD<br>
+                               <strong>Ezüst (XAG/USD):</strong> {prices.get('silver', 'N/A')} USD</p>
                             
                             {body}
                             
@@ -254,6 +242,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
