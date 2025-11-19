@@ -94,41 +94,48 @@ def call_openai(messages):
             time.sleep((i + 1) * 5)
     raise Exception("OpenAI hiba")
 
+# ===================== OpenAI összefoglaló – JAVÍTOTT, SOHA NEM SZÁLL EL =====================
 def generate_newsletter_content(news, prices):
-    news_text = "\n".join([f"- {n['title']} ({n.get('publishedAt', '')[:10]})" for n in news[:12]])
-    
+    # Árak biztonságos formázása (ha None vagy N/A jön, ne szálljon el a :.2f)
+    gold_price = f"{prices['gold']:.2f} USD" if prices['gold'] is not None else "N/A USD"
+    silver_price = f"{prices['silver']:.2f} USD" if prices['silver'] is not None else "N/A USD"
+
+    news_text = "\n".join([f"- {n['title']} ({n.get('publishedAt', '')[:10] or 'N/A'})" for n in news[:12]])
+
     prompt = f"""
     Készíts egy magyar nyelvű, profi pénzügyi hírlevelet arany és ezüst befektetőknek.
-    Mai árak: Arany: {prices['gold']:.2f} USD | Ezüst: {prices['silver']:.2f} USD
 
-    Friss hírek az elmúlt 4 napból:
+    Mai árak: Arany: {gold_price} | Ezüst: {silver_price}
+
+    Friss hírek az elmúlt 4 napból (csak a legfontosabbakat emeld ki):
     {news_text}
 
-    Kérlek, írj:
-    1. Rövid, figyelemfelkeltő subject line-t (max 60 karakter)
-    2. Preheader szöveget (max 100 karakter, amit a subject után látnak mobilon)
-    3. 3-5 mondatos bevezetőt
-    4. 4-6 legfontosabb hír bullet pointban, magyarul, rövid magyarázattal
-    5. Záró mondatot, ami cselekvésre ösztönöz (pl. portfólió áttekintés)
+    Kérlek, pontosan ebben a sorrendben és formátumban írd meg a hírlevelet:
 
-    Formázd úgy, hogy közvetlenül HTML-be illeszthető legyen.
+    1. Subject: <figyelemfelkeltő tárgysor max 60 karakter>
+    2. Preheader: <rejtett preheader szöveg max 100 karakter>
+    3. <3-5 mondatos bevezető szöveg>
+    4. <4-6 legfontosabb hír bulletben magyarul, 1-2 mondatos magyarázattal>
+    5. <záró mondat + cselekvésre ösztönzés, pl. portfólió áttekintés, kapcsolatfelvétel>
+
+    Ne írj semmilyen extra szöveget, csak ezt az 5 részt!
     """
+
     messages = [
-        {"role": "system", "content": "Te egy magyar pénzügyi hírlevél-szerkesztő vagy, aki arany/ezüst témában ír."},
+        {"role": "system", "content": "Te egy magyar pénzügyi hírlevél-szerkesztő vagy arany és ezüst témában."},
         {"role": "user", "content": prompt}
     ]
     return call_openai(messages)
 
-# ===================== Árak (yfinance) =====================
+# ===================== Árak – 2025-ben is mindig működik =====================
 def get_prices():
     import yfinance as yf
     try:
-        gold = yf.Ticker("XAUUSD=X").history(period="2d")["Close"].iloc[-1]
-        silver = yf.Ticker("XAGUSD=X").history(period="2d")["Close"].iloc[-1]
-        return {"gold": round(gold, 2), "silver": round(silver, 2)}
+        gold = yf.Ticker("GC=F").history(period="2d")["Close"].iloc[-1]
+        silver = yf.Ticker("SI=F").history(period="2d")["Close"].iloc[-1]
+        return {"gold": round(float(gold), 2), "silver": round(float(silver), 2)}
     except:
-        return {"gold": "N/A", "silver": "N/A"}
-
+        return {"gold": None, "silver": None}
 # ===================== MailerLite Campaign =====================
 def create_and_send_campaign(subject, preheader, html_content):
     url = "https://connect.mailerlite.com/api/campaigns"
@@ -234,6 +241,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
